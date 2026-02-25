@@ -1,4 +1,4 @@
-"""Scheduler for publishing posts at 19:00 MSK daily."""
+"""Scheduler for publishing posts daily."""
 import logging
 from pathlib import Path
 from aiogram import Bot
@@ -19,7 +19,7 @@ class PublishScheduler:
         channel_id: str,
         queue_dir: Path,
         published_dir: Path,
-        publish_hour: int = 19
+        publish_hour: int = 16
     ):
         """
         Initialize publish scheduler.
@@ -29,7 +29,7 @@ class PublishScheduler:
             channel_id: Telegram channel ID
             queue_dir: Directory with queued posts
             published_dir: Directory for published posts
-            publish_hour: Hour to publish (0-23), default 19
+            publish_hour: Hour to publish (0-23)
         """
         self.bot = bot
         self.channel_id = channel_id
@@ -72,7 +72,6 @@ class PublishScheduler:
 
     def start(self):
         """Start the scheduler."""
-        # Schedule daily at publish_hour:00 MSK
         self.scheduler.add_job(
             self.publish_next_post,
             trigger=CronTrigger(hour=self.publish_hour, minute=0, timezone="Europe/Moscow"),
