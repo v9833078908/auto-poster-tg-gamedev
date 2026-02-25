@@ -67,7 +67,7 @@ class ResearchAgent(BaseAgent):
         response = await self.llm.generate(
             system_prompt=self.system_prompt,
             user_message=user_message,
-            max_tokens=4096
+            max_tokens=8192
         )
 
         research_data = self._parse_json(response)
@@ -80,7 +80,7 @@ class ResearchAgent(BaseAgent):
         except json.JSONDecodeError:
             pass
 
-        code_block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        code_block = re.search(r'```(?:json)?\s*(\{.*\})\s*```', response, re.DOTALL)
         if code_block:
             try:
                 return json.loads(code_block.group(1))
