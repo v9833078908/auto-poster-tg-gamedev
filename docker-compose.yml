@@ -5,8 +5,6 @@ services:
     env_file: .env
     volumes:
       - bot_data:/app/data
-      - ./topic.json:/app/topic.json:ro
-      - ./prompts:/app/prompts:ro
     logging:
       driver: "json-file"
       options:
