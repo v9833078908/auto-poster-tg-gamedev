@@ -1,0 +1,33 @@
+{
+  "channel_name": "GameDev AI",
+  "channel_description": "Новые ИИ-инструменты для геймдев студий, исследования по применению ИИ в разработке игр и инфраструктуре",
+
+  "content_types": [
+    {"key": "tool_review",  "label": "🔧 Обзор инструмента"},
+    {"key": "research",     "label": "📊 Исследование/отчёт"},
+    {"key": "trend",        "label": "📈 Тренд/анализ"}
+  ],
+
+  "audiences": [
+    {"key": "indie",    "label": "🎯 Инди студии"},
+    {"key": "midsize",  "label": "🏢 Mid-size студии"},
+    {"key": "aaa",      "label": "🏗 AAA студии"},
+    {"key": "all",      "label": "🌐 Все студии"}
+  ],
+
+  "search_queries": {
+    "tool_review":  "AI tool review game development studio",
+    "research":     "AI research study report game development",
+    "trend":        "AI trend analysis game development industry"
+  },
+
+  "search_context": "gamedev AI 2025 2026",
+
+  "research_queries": [
+    "AI game development tools new release 2026",
+    "AI gamedev research study report 2025 2026",
+    "generative AI game studio workflow pipeline",
+    "procedural generation NPC AI Unity Unreal 2026",
+    "AI art animation game development tools"
+  ]
+}

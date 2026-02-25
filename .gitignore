@@ -1,0 +1,32 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# Data files
+data/queue/*.json
+data/published/*.json
+data/drafts/*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Server access (contains credentials)
+server_access.md
+*.ovpn

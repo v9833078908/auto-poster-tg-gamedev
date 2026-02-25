@@ -1,0 +1,17 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - bot_data:/app/data
+      - ./topic.json:/app/topic.json:ro
+      - ./prompts:/app/prompts:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot_data:
