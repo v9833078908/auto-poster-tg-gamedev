@@ -8,7 +8,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.states import PostCreation, ContentPlanFlow, AutopostFlow
+from bot.states import PostCreation, ContentPlanFlow, AutopostFlow, EditPostFlow
 
 logger = structlog.get_logger("handlers")
 
@@ -37,6 +37,7 @@ async def cmd_start(message: Message):
         "/autopost — создать пост по следующей теме из плана\n"
         "/publish — опубликовать следующий пост из очереди\n"
         "/queue — показать очередь постов\n"
+        "/edit — редактировать пост (очередь или опубликованные)\n"
         "/cancel — отменить текущее действие"
     )
 
@@ -561,3 +562,153 @@ async def cmd_queue(message: Message, state: FSMContext):
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+# ── /edit command — edit posts in queue or published ──────────────────
+
+@router.message(Command("edit"))
+async def cmd_edit(message: Message, state: FSMContext):
+    """Start post editing flow: choose queue or published."""
+    await state.clear()
+    logger.info("cmd_edit", user_id=message.from_user.id)
+
+    if orchestrator is None:
+        await message.answer("⚠️ Orchestrator не инициализирован.")
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Из очереди", callback_data="editsrc:queue")],
+        [InlineKeyboardButton(text="✅ Опубликованные", callback_data="editsrc:published")],
+    ])
+    await message.answer("Какой пост редактировать?", reply_markup=keyboard)
+    await state.set_state(EditPostFlow.choosing_source)
+
+
+@router.callback_query(EditPostFlow.choosing_source, F.data.startswith("editsrc:"))
+async def edit_choose_source(callback: CallbackQuery, state: FSMContext):
+    """Handle source selection (queue or published)."""
+    source = callback.data.split(":")[1]
+    publisher = orchestrator.publisher
+
+    if source == "queue":
+        posts = await publisher.list_queue()
+        directory = publisher.queue_dir
+    else:
+        posts = await publisher.list_published_detailed()
+        directory = publisher.published_dir
+
+    if not posts:
+        await callback.message.edit_text("Постов нет.")
+        await state.clear()
+        await callback.answer()
+        return
+
+    await state.update_data(edit_source=source, edit_dir=str(directory))
+
+    buttons = []
+    text = f"<b>{'Очередь' if source == 'queue' else 'Опубликованные'}:</b>\n\n"
+    for i, post in enumerate(posts):
+        preview = html.escape(post.get("preview", ""))
+        text += f"{i + 1}. {preview}\n\n"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{i + 1}. {post['filename'][:30]}",
+                callback_data=f"editpick:{post['filename']}"
+            )
+        ])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await state.set_state(EditPostFlow.choosing_post)
+    await callback.answer()
+
+
+@router.callback_query(EditPostFlow.choosing_post, F.data.startswith("editpick:"))
+async def edit_pick_post(callback: CallbackQuery, state: FSMContext):
+    """Show full post text and ask for new version."""
+    filename = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    directory = Path(data["edit_dir"])
+    publisher = orchestrator.publisher
+
+    post_data = await publisher.get_post_by_filename(directory, filename)
+    if not post_data:
+        await callback.message.edit_text("Пост не найден.")
+        await state.clear()
+        await callback.answer()
+        return
+
+    await state.update_data(edit_filename=filename)
+
+    final_post = post_data.get("final_post", "")
+
+    # Telegram messages have 4096 char limit — truncate if needed
+    if len(final_post) > 3500:
+        display = final_post[:3500] + "\n\n<i>... (обрезано)</i>"
+    else:
+        display = final_post
+
+    await callback.message.edit_text(
+        f"<b>Текущий текст поста:</b>\n\n{display}",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+    await callback.message.answer(
+        "Отправь новый текст поста целиком (HTML-разметка поддерживается).\n"
+        "Или /cancel для отмены."
+    )
+    await state.set_state(EditPostFlow.editing)
+    await callback.answer()
+
+
+@router.message(EditPostFlow.editing, F.text, F.text.func(lambda t: not t.startswith("/")))
+async def edit_save_post(message: Message, state: FSMContext):
+    """Save edited post text."""
+    new_text = message.text
+    data = await state.get_data()
+    source = data["edit_source"]
+    directory = Path(data["edit_dir"])
+    filename = data["edit_filename"]
+    publisher = orchestrator.publisher
+
+    try:
+        # Save to JSON
+        await publisher.update_post(directory, filename, new_text)
+
+        # If published, also edit the message in the channel
+        if source == "published":
+            post_data = await publisher.get_post_by_filename(directory, filename)
+            msg_id = post_data.get("message_id") if post_data else None
+            if msg_id and publish_scheduler:
+                try:
+                    await publish_scheduler.bot.edit_message_text(
+                        chat_id=publish_scheduler.channel_id,
+                        message_id=msg_id,
+                        text=new_text,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                    )
+                    await message.answer("✅ Пост обновлён в файле и в канале!")
+                except Exception as e:
+                    logger.warning("channel_edit_failed", error=str(e))
+                    await message.answer(
+                        f"✅ Пост обновлён в файле.\n"
+                        f"⚠️ Не удалось обновить в канале: <code>{html.escape(str(e)[:200])}</code>",
+                        parse_mode="HTML"
+                    )
+            else:
+                await message.answer(
+                    "✅ Пост обновлён в файле.\n"
+                    "⚠️ message_id не сохранён — не могу обновить в канале."
+                )
+        else:
+            await message.answer("✅ Пост в очереди обновлён!")
+
+    except Exception as e:
+        logger.error("edit_save_failed", error=str(e))
+        await message.answer(
+            f"❌ Ошибка сохранения: <code>{html.escape(str(e)[:300])}</code>",
+            parse_mode="HTML"
+        )
+
+    await state.clear()

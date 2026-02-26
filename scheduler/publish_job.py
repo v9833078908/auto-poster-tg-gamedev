@@ -55,7 +55,7 @@ class PublishScheduler:
                 return
 
             # Send to channel (no link previews)
-            await self.bot.send_message(
+            sent = await self.bot.send_message(
                 chat_id=self.channel_id,
                 text=final_post,
                 parse_mode="HTML",
@@ -63,8 +63,10 @@ class PublishScheduler:
             )
             logger.info(f"Published post to {self.channel_id}")
 
-            # Mark as published
-            published_file = await self.publisher.mark_published(queue_file)
+            # Mark as published, saving message_id for future editing
+            published_file = await self.publisher.mark_published(
+                queue_file, extra={"message_id": sent.message_id}
+            )
             logger.info(f"Moved to published: {published_file.name}")
 
         except Exception as e:

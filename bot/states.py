@@ -22,3 +22,11 @@ class AutopostFlow(StatesGroup):
     """States for autopost pipeline execution."""
 
     running = State()  # pipeline is running, can be cancelled
+
+
+class EditPostFlow(StatesGroup):
+    """States for editing a post (queue or published)."""
+
+    choosing_source = State()  # queue or published
+    choosing_post = State()  # selecting which post by number
+    editing = State()  # entering new text

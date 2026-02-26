@@ -62,12 +62,13 @@ class Publisher:
 
         return oldest, post_data
 
-    async def mark_published(self, queue_file: Path) -> Path:
+    async def mark_published(self, queue_file: Path, extra: Dict[str, Any] | None = None) -> Path:
         """
         Move post from queue to published.
 
         Args:
             queue_file: Path to queued post file
+            extra: Optional extra fields to merge (e.g. message_id)
 
         Returns:
             New path in published directory
@@ -78,6 +79,8 @@ class Publisher:
         # Update metadata
         post_data["status"] = "published"
         post_data["published_at"] = datetime.now().isoformat()
+        if extra:
+            post_data.update(extra)
 
         # Generate new path in published dir
         published_file = self.published_dir / queue_file.name
@@ -113,4 +116,33 @@ class Publisher:
                 "preview": data.get("final_post", "")[:100] + "..."
             })
 
+        return summaries
+
+    async def get_post_by_filename(self, directory: Path, filename: str) -> Dict[str, Any] | None:
+        """Read a specific post by filename from given directory."""
+        file_path = directory / filename
+        if not file_path.exists():
+            return None
+        return await self.store.read(file_path)
+
+    async def update_post(self, directory: Path, filename: str, new_text: str) -> None:
+        """Update final_post text for a post in the given directory."""
+        file_path = directory / filename
+        data = await self.store.read(file_path)
+        data["final_post"] = new_text
+        data["edited_at"] = datetime.now().isoformat()
+        await self.store.save(file_path, data)
+
+    async def list_published_detailed(self) -> list[Dict[str, Any]]:
+        """List published posts with preview and metadata."""
+        files = await self.store.list_files(self.published_dir)
+        summaries = []
+        for file_path in files:
+            data = await self.store.read(file_path)
+            summaries.append({
+                "filename": file_path.name,
+                "published_at": data.get("published_at"),
+                "message_id": data.get("message_id"),
+                "preview": data.get("final_post", "")[:100] + "..."
+            })
         return summaries
