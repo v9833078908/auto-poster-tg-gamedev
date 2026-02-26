@@ -568,7 +568,7 @@ async def cmd_queue(message: Message, state: FSMContext):
 
 @router.message(Command("edit"))
 async def cmd_edit(message: Message, state: FSMContext):
-    """Start post editing flow: choose queue or published."""
+    """Show all posts (queue + published) for editing."""
     await state.clear()
     logger.info("cmd_edit", user_id=message.from_user.id)
 
@@ -576,69 +576,89 @@ async def cmd_edit(message: Message, state: FSMContext):
         await message.answer("⚠️ Orchestrator не инициализирован.")
         return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Из очереди", callback_data="editsrc:queue")],
-        [InlineKeyboardButton(text="✅ Опубликованные", callback_data="editsrc:published")],
-    ])
-    await message.answer("Какой пост редактировать?", reply_markup=keyboard)
-    await state.set_state(EditPostFlow.choosing_source)
-
-
-@router.callback_query(EditPostFlow.choosing_source, F.data.startswith("editsrc:"))
-async def edit_choose_source(callback: CallbackQuery, state: FSMContext):
-    """Handle source selection (queue or published)."""
-    source = callback.data.split(":")[1]
     publisher = orchestrator.publisher
+    queue_posts = await publisher.list_queue()
+    published_posts = await publisher.list_published_detailed()
 
-    if source == "queue":
-        posts = await publisher.list_queue()
-        directory = publisher.queue_dir
-    else:
-        posts = await publisher.list_published_detailed()
-        directory = publisher.published_dir
-
-    if not posts:
-        await callback.message.edit_text("Постов нет.")
-        await state.clear()
-        await callback.answer()
+    if not queue_posts and not published_posts:
+        await message.answer("Постов нет — ни в очереди, ни опубликованных.")
         return
 
-    await state.update_data(edit_source=source, edit_dir=str(directory))
-
+    # Build a single list: queue first, then published
+    # Store mapping index -> (source, directory, filename)
+    post_map = {}
     buttons = []
-    text = f"<b>{'Очередь' if source == 'queue' else 'Опубликованные'}:</b>\n\n"
-    for i, post in enumerate(posts):
-        preview = html.escape(post.get("preview", ""))
-        text += f"{i + 1}. {preview}\n\n"
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"{i + 1}. {post['filename'][:30]}",
-                callback_data=f"editpick:{post['filename']}"
-            )
-        ])
+    text = ""
+    idx = 0
+
+    if queue_posts:
+        text += "<b>📋 В очереди:</b>\n\n"
+        for post in queue_posts:
+            idx += 1
+            preview = html.escape(post.get("preview", ""))
+            text += f"{idx}. {preview}\n\n"
+            post_map[str(idx)] = ("queue", str(publisher.queue_dir), post["filename"])
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"📋 {idx}. {post['filename'][:25]}",
+                    callback_data=f"editpick:{idx}"
+                )
+            ])
+
+    if published_posts:
+        text += "<b>✅ Опубликованные:</b>\n\n"
+        for post in published_posts:
+            idx += 1
+            preview = html.escape(post.get("preview", ""))
+            text += f"{idx}. {preview}\n\n"
+            post_map[str(idx)] = ("published", str(publisher.published_dir), post["filename"])
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"✅ {idx}. {post['filename'][:25]}",
+                    callback_data=f"editpick:{idx}"
+                )
+            ])
+
+    await state.update_data(edit_post_map=post_map)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await message.answer(
+        f"{text}Выбери пост для редактирования:",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
     await state.set_state(EditPostFlow.choosing_post)
-    await callback.answer()
 
 
 @router.callback_query(EditPostFlow.choosing_post, F.data.startswith("editpick:"))
 async def edit_pick_post(callback: CallbackQuery, state: FSMContext):
     """Show full post text and ask for new version."""
-    filename = callback.data.split(":", 1)[1]
+    pick_idx = callback.data.split(":", 1)[1]
     data = await state.get_data()
-    directory = Path(data["edit_dir"])
-    publisher = orchestrator.publisher
+    post_map = data.get("edit_post_map", {})
 
-    post_data = await publisher.get_post_by_filename(directory, filename)
-    if not post_data:
+    if pick_idx not in post_map:
         await callback.message.edit_text("Пост не найден.")
         await state.clear()
         await callback.answer()
         return
 
-    await state.update_data(edit_filename=filename)
+    source, dir_str, filename = post_map[pick_idx]
+    directory = Path(dir_str)
+    publisher = orchestrator.publisher
+
+    post_data = await publisher.get_post_by_filename(directory, filename)
+    if not post_data:
+        await callback.message.edit_text("Файл поста не найден.")
+        await state.clear()
+        await callback.answer()
+        return
+
+    await state.update_data(
+        edit_source=source,
+        edit_dir=dir_str,
+        edit_filename=filename,
+    )
 
     final_post = post_data.get("final_post", "")
 
